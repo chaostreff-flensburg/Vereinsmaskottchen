@@ -1,3 +1,9 @@
+#include <Wire.h>
+#define adress 0x01
+        /*  0x02 Sensoren
+         *   
+         */
+
 /*
   _________________________________
   |             O  O              |   rearhall  Echo:lila(29)  Trig:blau(28)
@@ -34,13 +40,16 @@ int rightBackward;
 //Sensorboard
 int CLP = 44;
 
-//Serialle Kommunikation
+//Kommunikation
 char data[9];
 int incount;
 int lineComplete;
 int current;
 unsigned long timeout;
 bool timedout;
+// A4 = SDA                 Pins die für die I2C Kommunikation am Arduino benutzt werden müssen,
+// A5 = SCL                 sie werden nicht im Sektch definiert
+
 
 void setup() {
 
@@ -52,9 +61,13 @@ void setup() {
   
   pinMode(CLP, INPUT);                            //wird für Notaus benötigt
 
-  Serial.begin(9600);
+  Serial.begin(9600);                             //wird für serielle Kommunikation UND I2C benötigt
+
+  Wire.begin(adress);                             //I2C Setup
+  Wire.onReceive(readSerialData);
+  Wire.onRequest(requestData);
 }
-//------------------------------------------------Bewegungsfunktionen
+//------------------------------------------------ Bewegungsfunktionen
 void backward() {
   backwardRight();
   backwardLeft();
@@ -91,7 +104,7 @@ void stopMotors() {
   stopRight();
   stopLeft();
 }
-//------------------------------------------------Notausfunktion: bei Vorwärtsbewegung statt delay() zu verwenden; bei Schließen des Schalters stoppt die Bewegung
+//------------------------------------------------ Notausfunktion: bei Vorwärtsbewegung statt delay() zu verwenden; bei Schließen des Schalters stoppt die Bewegung
 void delayCheck(int d) {
   for (int i = 0; i <= d; i = i + 50) {
     if (digitalRead(CLP) == 1) {
@@ -105,22 +118,21 @@ void delayCheck(int d) {
     delay(50);
   }
 }
-//------------------------------------------------Serielle Kommunikation mit dem Pi zur Steuerung mit einem Gamepad
-void readSerialData() {                                                               // Bufferform: x;x;x;x* mit x={0;1}
-  while ( Serial.available() & incount < 8 & !lineComplete )  {
-    current = Serial.read();
-    if (current != 42) { //ASCII 42 == '*'                                            // solange Zeichen lesen bis das Sternchen den Datensatz abschließt
+//------------------------------------------------ Kommunikation mit dem Pi
+void readSerialData() {                                                // Bufferform: x;x;x;x* mit x={0;1}
+  while ( Wire.available() & incount < 8 & !lineComplete )  {
+    current = Wire.read();
+    if (current != 42) { //ASCII 42 == '*'                             // solange Zeichen lesen bis das Sternchen den Datensatz abschließt
       data[incount] = current;
       incount++;
     }
     else {
-      data[incount] = '\0';                                                           // puffer mit NULL Zeichen abschließen, damit das Ende der Zeichenkette durch string Operationen erkannt wird
+      data[incount] = '\0';                                            // puffer mit NULL Zeichen abschließen, damit das Ende der Zeichenkette durch string Operationen erkannt wird
       lineComplete = true;
     }
   }
-  if (lineComplete) {                                                                 // Wenn der volle Datensatz gelesen wurde
-    daten_auswerten();
-    werte_beurteilen();
+  if (lineComplete) {                                                  // Wenn der volle Datensatz gelesen wurde
+    daten_checken();
     reset();
     resetTimeOut();
   }
@@ -136,13 +148,28 @@ void resetTimeOut() {
   timeout = millis();
   timedout = false;
 }
-void daten_auswerten() {
-  leftForward = atoi (strtok (data, ";"));              // links forwards                                   // Zerlegen des Buffers jeweils bis zum ";"
-  leftBackward = atoi (strtok (NULL, ";"));             // links backwards                                  // anschließend umformen von String zu Array
-  rightForward = atoi (strtok (NULL, ";"));             // rechts forwards                                  // anschließend umformen von Array zu Integer
-  rightBackward = atoi (strtok (NULL, "*"));            // rechts backwards                                 // und zuweisen zu den Variablen
+void daten_checken(){                                   //üerprüft die empfangene Datenstruktur 
+  if( (data[0] == 0 || data[0] == 1) &&
+      (data[2] == 0 || data[2] == 1) &&
+      (data[4] == 0 || data[4] == 1) &&
+      (data[6] == 0 || data[6] == 1) ) {
+        daten_auswerten();
+        werte_interpretieren();
+      }
+  else{
+    requestData("data-Fehler!");                       // vom Pi zu interpretieren
+  }
 }
-void werte_beurteilen() {
+String requestData(String nachricht){
+  Wire.println(nachricht);
+}
+void daten_auswerten() {
+  leftForward = atoi (strtok (data, ";"));              // Zerlegen des Buffers jeweils bis zum ";"
+  leftBackward = atoi (strtok (NULL, ";"));             // anschließend umformen von String zu Array
+  rightForward = atoi (strtok (NULL, ";"));             // anschließend umformen von Array zu Integer
+  rightBackward = atoi (strtok (NULL, "*"));            // und zuweisen zu den Variablen
+}
+void werte_interpretieren() {
   if ((leftForward == 0) && (rightForward == 0) && (leftBackward == 0) && (rightBackward == 0)) {
     stopMotors();
   }
@@ -171,9 +198,9 @@ void werte_beurteilen() {
 }
 
 void checkTimeOut() {
-  if ( !timedout && millis() - timeout > 1000) {
+  if ( !timedout && millis() - timeout > 250) {
     stopMotors();
-    Serial.println("timeout");
+    requestData("timeout");
     timedout = true;
   }
 }
@@ -183,4 +210,3 @@ void loop() {
   readSerialData();
   checkTimeOut();
 }
-
