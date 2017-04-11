@@ -50,7 +50,7 @@ bool timedout;
 // A4 = SDA                 Pins die für die I2C Kommunikation am Arduino benutzt werden müssen,
 // A5 = SCL                 sie werden nicht im Sektch definiert
 
-
+int sendData;
 void setup() {
 
 //Motoren
@@ -119,7 +119,7 @@ void delayCheck(int d) {
   }
 }
 //------------------------------------------------ Kommunikation mit dem Pi
-void readSerialData() {                                                // Bufferform: x;x;x;x* mit x={0;1}
+void readSerialData(int take) {                                                // Bufferform: x;x;x;x* mit x={0;1}
   while ( Wire.available() & incount < 8 & !lineComplete )  {
     current = Wire.read();
     if (current != 42) { //ASCII 42 == '*'                             // solange Zeichen lesen bis das Sternchen den Datensatz abschließt
@@ -157,11 +157,12 @@ void daten_checken(){                                   //üerprüft die empfang
         werte_interpretieren();
       }
   else{
-    requestData("data-Fehler!");                       // vom Pi zu interpretieren
+    sendData = 200;                       //Data-Fehler
+    requestData();                       // vom Pi zu interpretieren
   }
 }
-String requestData(String nachricht){
-  Wire.println(nachricht);
+void requestData(){
+  Wire.write(sendData);
 }
 void daten_auswerten() {
   leftForward = atoi (strtok (data, ";"));              // Zerlegen des Buffers jeweils bis zum ";"
@@ -200,13 +201,14 @@ void werte_interpretieren() {
 void checkTimeOut() {
   if ( !timedout && millis() - timeout > 250) {
     stopMotors();
-    requestData("timeout");
+    sendData = 100;                                //timeout
+    requestData();
     timedout = true;
   }
 }
 
 //---------------------------------------------------------------------------------------------------------------------------------------------------
 void loop() {
-  readSerialData();
+
   checkTimeOut();
 }
