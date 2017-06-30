@@ -1,40 +1,20 @@
+
 #include <Wire.h>
 #include <NewPing.h>
-#define adress 0x02
-/*  0x01 MotorenSteuerung
-                     xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx   Debuggen   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-*/
-/*
-  _________________________________
-  |             O  O              |   rearhall  Echo:lila(29)  Trig:blau(28)
-  | ____                     ____ |
-  |rechts|                 | links|
-  |      |                 |      |
-  |      |                 |      |
-  |      |      Sound      |      |
-  |      |                 |      |
-  |      |                 |      |
-  | ____ |                 | ____ |
-  |                               |
-  |   O  O                 O  O   |   fronthall  Rechts   Echo:schwarz(36)  Trig:weiß(37)
-  |             O  O              |              Mitte    Echo:orange(35)  Trig:gelb(34)
-  |_______________________________|              Links    Echo:grün(33)  Trig:blau(32)
-  [S5]  [S4]  [S3]  [S2]  [S1]      S1:orange(54)  S2:gelb(52)  S3:grün(50)  S4:blau(48)  S5:braun(46)
-  [near]  [CLP]                     near:grau(42)  CLP:weiß(44)
-
-
-*/
+#define address 0x03
 
 //Ultraschallsensoren
-int hallRearEcho = 29;
-int hallRearTrig = 28;
+int hallRearEcho = 30;
+int hallRearTrig = 31;
 int hallFrontRightEcho = 36;
 int hallFrontRightTrig = 37;
 int hallFrontMiddleEcho = 35;
 int hallFrontMiddleTrig = 34;
 int hallFrontLeftEcho = 33;
 int hallFrontLeftTrig = 32;
-int entfernung;
+unsigned int entfernung[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+uint8_t entfernung_request[] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int distance;
 int TRIGGER_PIN;
 int ECHO_PIN;
 int MAX_DISTANCE = 200;
@@ -47,20 +27,9 @@ int h[4][2] = {
 int ent[4];
 int i;
 
-//Sensorboard: Infrarot, Hardware
-int S1 = 54;
-int S2 = 52;
-int S3 = 50;
-int S4 = 48;
-int S5 = 46;
-int CLP = 44;
-int Near = 42;
-
 // A4 = SDA                 Pins die für die I2C Kommunikation am Arduino benutzt werden müssen,
 // A5 = SCL                 sie werden nicht im Sektch definiert
 
-int empfang = 0;
-int sendData = 0;
 void setup() {
   pinMode(hallRearEcho, INPUT);
   pinMode(hallRearTrig, OUTPUT);
@@ -70,49 +39,76 @@ void setup() {
   pinMode(hallFrontMiddleTrig, OUTPUT);
   pinMode(hallFrontLeftEcho, INPUT);
   pinMode(hallFrontLeftTrig, OUTPUT);
-
-  pinMode(S1, INPUT);
-  pinMode(S2, INPUT);
-  pinMode(S3, INPUT);
-  pinMode(S4, INPUT);
-  pinMode(S5, INPUT);
-  pinMode(CLP, INPUT);                            //auch in MotorSteuerung aktiv für Notaus
-  pinMode(Near, INPUT);
-
+  
   Serial.begin(9600);
 
-  Wire.begin(adress);                             //I2C Setup
-  Wire.onReceive(readSerialData);
-  Wire.onRequest(requestData);  
+  Wire.begin(address);                             //I2C Setup
+  Wire.onRequest(requestEvent);
 }
 
-//------------------------------------------------HallSensorenfunktion: Es müssen die Pins übergeben werden und es wird die Entfernung zurückgegeben
-int hallSensor(int cnt) {  
-    TRIGGER_PIN = h[cnt][0];
-    ECHO_PIN = h[cnt][1];
-
-    NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
-
-    entfernung = sonar.ping_cm();                    //in cm                                    
-    return entfernung;
+void requestEvent() {
+  Wire.write(entfernung_request, 10);
 }
 
-void readSerialData(int take){
-  while (Wire.available()){
-    empfang = Wire.read();
+int hallSensor(int cnt) {
+  TRIGGER_PIN = h[cnt][0];
+  ECHO_PIN = h[cnt][1];
+
+  NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
+  distance = 0;
+  for (int i = 0; i < 2; i++) {
+    distance = distance + sonar.ping_cm();          //in cm
+    delay(50);                                      //zur Vermeidung von Interferrenzen der einzelnen Messungen, 29 sollte das kürzeste sein
   }
+  distance = distance / 2;
+  if (distance == 0){
+    distance = 200;
+  }
+  return distance;
 }
 
-void requestData(){
-  Wire.write(sendData);
-}
-//---------------------------------------------------------------------------------------------------------------------------------------------------
 void loop() {
-  while ( Wire.available() )  {
-    for (int i = 0; i < 4; i++) {
-      sendData = hallSensor(i);
-      requestData();
-      delay(40);                        //zur Vermeidung von Interferrenzen der einzelnen Messungen, 29 sollte das kürzeste sein
-    }
+  for (int i = 0; i < 4; i++) {
+    hallSensor(i);                                    //hinten -> rechts, mitte, links (vorne)
+    entfernung[i*2+2] = distance;
+  }
+  
+ /* for (int i = 0; i < 9; i = i + 2) {
+    Serial.println(entfernung[i]);                   //zu diagnosezwecken
+  }
+  Serial.println("------------");
+ */ 
+  // zerlegen der Integer Werte in zwei Byte Werte zur I2C Übertragung
+  /*
+     entfernung[0]     ->    counter
+     entfernung[1]     ->    ungenutzt
+     entfernung[2]     ->    hinten_high_bits
+     entfernung[3]     ->    hinten_low_bits
+     entfernung[4]     ->    rechts_high_bits
+     entfernung[5]     ->    rechts_low_bits
+     entfernung[6]     ->    mitte_high_bits
+     entfernung[7]     ->    mitte_low_bits
+     entfernung[8]     ->    links_high_bits
+     entfernung[9]     ->    links_low_bits
+  */
+
+  for (int i = 2; i < 9; i = i + 2) {
+    entfernung[i + 1] = entfernung[i];                // kopieren der Messwerte
+    entfernung[i] = entfernung[i] >> 8;               // verschieben der bits
+  }
+    entfernung[1]=entfernung[0];                      // * betrifft den counter, der Wert entfernung[0]
+    entfernung[1]=entfernung[1]>>8;                   // * soll jedoch nicht verändert werden, daher
+    entfernung_request[0]=(byte)entfernung[1];        // * hier eine getrennte Behandlung 
+    entfernung_request[1]=(byte)entfernung[0];        // *
+  
+  for (int i = 2; i < 10; i++) {
+    entfernung_request[i] = (byte) entfernung[i];
+  }
+  
+  if (entfernung[0] > 60000) {                        // entfernung[0] zählt die messungen hoch damit der master prüfen kann ob es ich um neue oder alte werte handelt
+    entfernung[0] = 0;
+  } else {
+    entfernung[0] = entfernung[0] + 1;                  
   }
 }
+
