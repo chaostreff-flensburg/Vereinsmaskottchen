@@ -1,0 +1,108 @@
+
+
+#include <Wire.h>
+
+#define SENSOR_DEVICE 0x03
+#define SENSOR_REQUEST_SIZE 10
+
+#define TRANSMISSION_MOTOR_DEVICE 0x02
+#define TRANSMISSION_MOTOR_SIZE 6
+
+byte ergebnis_sensor_request[SENSOR_REQUEST_SIZE] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+unsigned int ergebnis_sensor[SENSOR_REQUEST_SIZE / 2] = {0, 0, 0, 0, 0};
+int sensor_data[SENSOR_REQUEST_SIZE/2] = {0, 0, 0, 0, 0};
+int on_Pin=7;
+bool request_counter;
+byte motorSpeedL;
+byte motorSpeedR;
+byte transmission_motor_massage[TRANSMISSION_MOTOR_SIZE] = {0, 0, 0, 0, 0,0};
+
+int sensor_counter = 0;
+
+void setup() {
+  pinMode(on_Pin,INPUT);
+  request_counter=true;
+  Serial.begin(9600);
+  Wire.begin();
+  motorSpeedL = 100;                  // 0 ... 255 
+  motorSpeedR = 100;
+  transmission_motor_massage[4]=motorSpeedL;
+  transmission_motor_massage[5]=motorSpeedR;
+}
+
+void loop() {
+  for (int i = 1; i < (TRANSMISSION_MOTOR_SIZE-2); i++) {                    // clear sensor Data
+    sensor_data[i] = 0;
+  }
+  request_counter=true;
+  sensor_counter = sensor_data[0];                                       // Speichern der vorherigen Sensornummer
+
+  Wire.requestFrom(SENSOR_DEVICE, SENSOR_REQUEST_SIZE);                  // first: address of request device; second: exptected amound of bytes
+  if (Wire.available() == SENSOR_REQUEST_SIZE && request_counter == true) {                         // check the request size
+    for (int i = 0; i < SENSOR_REQUEST_SIZE; i++) {
+      ergebnis_sensor_request[i] = Wire.read();                          // save each requested byte separatly
+    }
+
+    for (int j = 0; j < SENSOR_REQUEST_SIZE / 2; j++) {
+      ergebnis_sensor[j] = (int)ergebnis_sensor_request[j * 2];          // speichern des ersten byte Packets als integer
+      ergebnis_sensor[j] = ergebnis_sensor[j] << 8;                      // links shift der Bits um ein byte (8 Bits)
+      ergebnis_sensor[j] |= ergebnis_sensor_request[j * 2 + 1];          // zufügen des zweiten byte Peckets (stets auf Position des rechten bytes)
+      sensor_data[j] = ergebnis_sensor[j];                               // speichern in das auszuwertende Array
+      //Serial.println(ergebnis_sensor[j]);
+      ergebnis_sensor[j] = 0;
+      ergebnis_sensor_request[j];
+      ergebnis_sensor_request[j + 1];
+    }
+    //Serial.println("*************************");
+    request_counter=false;
+  }
+  /*else {
+    Serial.println("unexpected SENSOR_REQUEST_SIZE!");
+  }
+*/
+  if (sensor_data[0] > sensor_counter) {
+    if (sensor_data[3] > 60) {                                             // wenn nach vorn mindesten 70 cm frei...
+      transmission_motor_massage[0] = 1;                                  // ...Attacke nach vorn
+      transmission_motor_massage[1] = 0;
+      transmission_motor_massage[2] = 1;
+      transmission_motor_massage[3] = 0;
+    } else {                                                               // wenn weniger als 70 cm nach vorn frei sind...
+      if (sensor_data[2] > 60 || sensor_data[4] > 60) {                    // ... und wenn zu den Seiten genug Platz ist...
+        if (sensor_data[2] > sensor_data[4]) {                              // ...und rechts mehr Platz als links ist...
+          transmission_motor_massage[0] = 1;                               // ...fahre nach rechts,
+          transmission_motor_massage[1] = 0;
+          transmission_motor_massage[2] = 0;
+          transmission_motor_massage[3] = 0;
+        } else {
+          transmission_motor_massage[0] = 0;                          // sonst nach links
+          transmission_motor_massage[1] = 0;
+          transmission_motor_massage[2] = 1;
+          transmission_motor_massage[3] = 0;
+        }
+      } else {                                                              // ist zu den seiten auch weniger als 70 cm Platz..
+        transmission_motor_massage[0] = 0;                           // drehe dich!
+        transmission_motor_massage[1] = 1;
+        transmission_motor_massage[2] = 0;
+        transmission_motor_massage[3] = 1;
+        delay(1500);
+        transmission_motor_massage[0] = 1;                           // drehe dich!
+        transmission_motor_massage[1] = 0;
+        transmission_motor_massage[2] = 0;
+        transmission_motor_massage[3] = 1;
+        delay(500);
+      }
+    }
+    Wire.beginTransmission(TRANSMISSION_MOTOR_DEVICE);                        // Verbindung herstellen
+    for (int i = 0; i < TRANSMISSION_MOTOR_SIZE; i++) {                     // Übertragung der Nachricht Byteweise
+      Wire.write(transmission_motor_massage[i]);
+    }
+    Wire.endTransmission();                                                 // Verbindung trennen
+    /*
+    for (int i =0;i<4;i++){
+      Serial.println(transmission_motor_massage[i]);
+    }
+    Serial.println("----------------------------------------");
+    */
+    delay(330);                                                            // warten bis zum nächsten Fahrbefehl (in dieser Zeit wird die Bewegung ausgeführt)
+  }
+}
